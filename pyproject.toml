@@ -1,0 +1,123 @@
+[project]
+name = "async-mcp-gateway"
+version = "0.1.0"
+description = "Production-grade asynchronous multi-tenant AI gateway with Redis rate limiting, provider failover, and MCP process supervision."
+readme = "README.md"
+requires-python = ">=3.11,<3.14"
+license = { text = "MIT" }
+authors = [
+  { name = "Fernando Garza" }
+]
+keywords = [
+  "ai-gateway",
+  "asyncio",
+  "fastapi",
+  "llm",
+  "mcp",
+  "multi-tenant",
+  "redis",
+]
+classifiers = [
+  "Development Status :: 4 - Beta",
+  "Framework :: FastAPI",
+  "Intended Audience :: Developers",
+  "License :: OSI Approved :: MIT License",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Topic :: Internet :: WWW/HTTP :: HTTP Servers",
+  "Topic :: Software Development :: Libraries :: Application Frameworks",
+]
+dependencies = [
+  "fastapi==0.115.6",
+  "uvicorn[standard]==0.32.1",
+  "redis[hiredis]==5.2.1",
+  "httpx==0.28.1",
+  "pydantic>=2.0,<3.0",
+  "pydantic-settings==2.7.1",
+  "mcp>=1.2.0,<2.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/fernandogarzaaa/async-mcp-gateway"
+Repository = "https://github.com/fernandogarzaaa/async-mcp-gateway"
+Issues = "https://github.com/fernandogarzaaa/async-mcp-gateway/issues"
+
+[dependency-groups]
+dev = [
+  "black==24.10.0",
+  "locust==2.32.5",
+  "mypy==1.14.0",
+  "pytest==8.4.2",
+  "pytest-asyncio==0.25.0",
+  "pytest-cov==6.0.0",
+  "ruff==0.8.4",
+]
+
+[build-system]
+requires = ["hatchling>=1.26.3"]
+build-backend = "hatchling.build"
+
+[tool.uv]
+package = false
+
+[tool.ruff]
+line-length = 88
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I"]
+fixable = ["E", "F", "I"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["app", "tests"]
+
+[tool.black]
+line-length = 88
+target-version = ["py311", "py312", "py313"]
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+ignore_missing_imports = true
+explicit_package_bases = true
+warn_unused_configs = true
+warn_redundant_casts = true
+warn_unused_ignores = true
+show_error_codes = true
+pretty = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+asyncio_mode = "strict"
+addopts = [
+  "--strict-markers",
+  "--cov=app",
+  "--cov-report=term-missing",
+  "--cov-fail-under=70",
+]
+markers = [
+  "integration: tests that exercise multiple gateway subsystems",
+  "unit: focused unit tests for isolated components",
+]
+
+[tool.coverage.run]
+source = ["app"]
+omit = [
+  "tests/*",
+  "mock_mcp_server.py",
+]
+
+[tool.coverage.report]
+show_missing = true
+skip_covered = false
+fail_under = 70
+exclude_lines = [
+  "pragma: no cover",
+  "if __name__ == .__main__.:",
+  "raise NotImplementedError",
+]

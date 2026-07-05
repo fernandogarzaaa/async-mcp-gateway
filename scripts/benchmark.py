@@ -124,7 +124,10 @@ async def run_one_request(
             {"role": "system", "content": "Return concise benchmark output."},
             {
                 "role": "user",
-                "content": f"tenant={tenant_id} request={request_index} produce a short streamed response",
+                "content": (
+                    f"tenant={tenant_id} request={request_index} produce a "
+                    "short streamed response"
+                ),
             },
         ],
         "max_tokens": 64,
@@ -212,7 +215,8 @@ def report(results: list[RequestResult]) -> None:
     sample_errors = [result for result in errors if result.error][:5]
     for index, result in enumerate(sample_errors, start=1):
         print(
-            f"sample_error_{index} tenant={result.tenant_id} latency_ms={result.latency_ms:.2f} error={result.error}"
+            f"sample_error_{index} tenant={result.tenant_id} "
+            f"latency_ms={result.latency_ms:.2f} error={result.error}"
         )
 
 

@@ -517,7 +517,8 @@ class MCPProcessPoolManager:
         active = sum(1 for key in self._processes if key.tenant_id == tenant_id)
         if active >= policy.max_processes:
             raise MCPAccessDenied(
-                f"tenant {tenant_id!r} exceeded MCP process limit {policy.max_processes}"
+                f"tenant {tenant_id!r} exceeded MCP process limit "
+                f"{policy.max_processes}"
             )
 
     async def _reaper_loop(self) -> None:

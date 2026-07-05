@@ -1,0 +1,56 @@
+[project]
+name = "async-mcp-gateway"
+version = "0.1.0"
+description = "Asynchronous multi-tenant AI Gateway and MCP load balancer."
+readme = "README.md"
+requires-python = ">=3.11,<3.14"
+authors = [
+  { name = "Fernando Garza" }
+]
+dependencies = [
+  "fastapi==0.115.6",
+  "uvicorn[standard]==0.32.1",
+  "redis[hiredis]==5.2.1",
+  "httpx==0.28.1",
+  "pydantic>=2.0,<3.0",
+  "pydantic-settings==2.7.1",
+]
+
+[dependency-groups]
+dev = [
+  "pytest==8.4.2",
+  "pytest-asyncio==0.25.0",
+  "pytest-cov==6.0.0",
+]
+
+[build-system]
+requires = ["hatchling>=1.26.3"]
+build-backend = "hatchling.build"
+
+[tool.uv]
+package = false
+
+[tool.ruff]
+line-length = 88
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I"]
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+ignore_missing_imports = true
+explicit_package_bases = true
+show_error_codes = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+asyncio_mode = "strict"
+addopts = [
+  "--strict-markers",
+]
+

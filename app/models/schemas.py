@@ -152,8 +152,10 @@ class MCPSupervisorConfig(BaseModel):
         for policy in self.tenant_policies.values():
             unknown = policy.allowed_servers.difference(self.servers)
             if unknown:
+                servers = sorted(unknown)
                 raise ValueError(
-                    f"tenant {policy.tenant_id} references unknown MCP servers: {sorted(unknown)}"
+                    f"tenant {policy.tenant_id} references unknown MCP servers: "
+                    f"{servers}"
                 )
         return self
 

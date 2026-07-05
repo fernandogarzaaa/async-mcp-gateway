@@ -78,7 +78,10 @@ def handle_request(request: JsonDict) -> JsonDict | None:
                     },
                     {
                         "name": "hang",
-                        "description": "Sleeps forever to validate timeout and reaping behavior.",
+                        "description": (
+                            "Sleeps forever to validate timeout and reaping "
+                            "behavior."
+                        ),
                         "inputSchema": {"type": "object"},
                     },
                     {
