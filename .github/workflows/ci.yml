@@ -1,0 +1,117 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    name: Lint and format
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install tooling
+        run: |
+          python -m pip install --upgrade pip==24.2
+          python -m pip install ruff==0.8.4 black==24.10.0
+
+      - name: Ruff lint
+        run: ruff check app tests scripts mock_mcp_server.py
+
+      - name: Black format check
+        run: black --check app tests scripts mock_mcp_server.py
+
+  typecheck:
+    name: Static type analysis
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip==24.2
+          python -m pip install \
+            fastapi==0.115.6 \
+            uvicorn[standard]==0.32.1 \
+            httpx==0.28.1 \
+            redis==5.2.1 \
+            pydantic==2.10.4 \
+            pydantic-settings==2.7.1 \
+            pytest==8.4.2 \
+            pytest-asyncio==0.25.0 \
+            pytest-cov==6.0.0 \
+            mypy==1.14.0
+
+      - name: Mypy
+        run: mypy --strict --explicit-package-bases app tests scripts mock_mcp_server.py
+
+  test:
+    name: Pytest with Redis
+    runs-on: ubuntu-24.04
+    services:
+      redis:
+        image: redis:7.4.1-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip==24.2
+          python -m pip install \
+            fastapi==0.115.6 \
+            uvicorn[standard]==0.32.1 \
+            httpx==0.28.1 \
+            redis==5.2.1 \
+            pydantic==2.10.4 \
+            pydantic-settings==2.7.1 \
+            pytest==8.4.2 \
+            pytest-asyncio==0.25.0 \
+            pytest-cov==6.0.0
+
+      - name: Run tests
+        env:
+          REDIS_URI: redis://127.0.0.1:6379/0
+        run: pytest --cov=app --cov-report=term-missing --cov-report=xml --cov-fail-under=70
+
+      - name: Upload coverage
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-xml
+          path: coverage.xml

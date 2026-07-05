@@ -1,0 +1,85 @@
+services:
+  gateway:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: runtime
+    image: ai-gateway:local
+    ports:
+      - "8000:8000"
+    environment:
+      APP_NAME: multi-tenant-ai-gateway
+      LOG_LEVEL: INFO
+      REDIS_URI: redis://redis:6379/0
+      REQUEST_TIMEOUT_SECONDS: "30"
+      STREAM_CONNECT_TIMEOUT_SECONDS: "10"
+      FAILOVER_BUDGET_MS: "100"
+      SSE_SCAN_TAIL_BYTES: "512"
+      OPENAI__BASE_URL: https://api.openai.com
+      OPENAI__CHAT_PATH: /v1/chat/completions
+      OPENAI__STREAM_PATH: /v1/chat/completions
+      OPENAI__DEFAULT_MODEL: gpt-4o-mini
+      ANTHROPIC__BASE_URL: https://api.anthropic.com
+      ANTHROPIC__CHAT_PATH: /v1/messages
+      ANTHROPIC__STREAM_PATH: /v1/messages
+      ANTHROPIC__DEFAULT_MODEL: claude-3-5-haiku-latest
+      LOCAL__BASE_URL: http://host.docker.internal:3000
+      LOCAL__CHAT_PATH: /v1/chat/completions
+      LOCAL__STREAM_PATH: /v1/chat/completions
+      LOCAL__DEFAULT_MODEL: local-fallback
+    depends_on:
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/readyz', timeout=3).read()\""]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    read_only: true
+    tmpfs:
+      - /tmp:size=128m,mode=1777
+    restart: unless-stopped
+
+  redis:
+    image: redis/redis-stack-server:7.4.0-v1
+    ports:
+      - "6379:6379"
+    command: ["redis-server", "--appendonly", "yes", "--save", "60", "1000", "--maxmemory", "512mb", "--maxmemory-policy", "allkeys-lru"]
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    security_opt:
+      - no-new-privileges:true
+    restart: unless-stopped
+
+  benchmark:
+    image: ai-gateway:local
+    profiles:
+      - test
+    depends_on:
+      gateway:
+        condition: service_healthy
+    environment:
+      BENCHMARK_BASE_URL: http://gateway:8000
+      BENCHMARK_TENANTS: "100"
+      BENCHMARK_CONCURRENCY: "100"
+      BENCHMARK_REQUESTS_PER_TENANT: "10"
+      BENCHMARK_TIMEOUT_SECONDS: "45"
+    command: ["python", "scripts/benchmark.py"]
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+
+volumes:
+  redis-data:
+
