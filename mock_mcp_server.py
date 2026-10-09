@@ -51,6 +51,18 @@ def handle_request(request: JsonDict) -> JsonDict | None:
     if delay > 0:
         time.sleep(delay)
 
+    if method == "initialize":
+        return success_response(
+            request_id,
+            {
+                "protocolVersion": str(
+                    params.get("protocolVersion", "2025-06-18") or "2025-06-18"
+                ),
+                "capabilities": {"tools": {}},
+                "serverInfo": {"name": "mock-mcp", "version": "0.1.0"},
+            },
+        )
+
     if method == "ping":
         return success_response(
             request_id, {"status": "ok", "tenant_id": os.getenv("TENANT_ID", "")}
@@ -132,7 +144,7 @@ def handle_request(request: JsonDict) -> JsonDict | None:
             },
         )
 
-    if method == "notifications/initialized":
+    if isinstance(method, str) and method.startswith("notifications/"):
         return None
 
     return error_response(request_id, -32601, f"method not found: {method}")
