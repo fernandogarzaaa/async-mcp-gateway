@@ -1,0 +1,23 @@
+{
+  "servers": {
+    "mock": {
+      "name": "mock",
+      "command": ["python", "-u", "mock_mcp_server.py"],
+      "request_timeout_seconds": 10,
+      "idle_ttl_seconds": 300,
+      "health_check": {"enabled": false}
+    },
+    "notes": {
+      "name": "notes",
+      "command": ["python", "-u", "examples/notes_mcp_server.py"],
+      "request_timeout_seconds": 15,
+      "idle_ttl_seconds": 300,
+      "health_check": {"enabled": false}
+    }
+  },
+  "tenant_policies": {
+    "tenant-beta": {"tenant_id": "tenant-beta", "allowed_servers": ["mock"], "max_processes": 2}
+  },
+  "reap_interval_seconds": 15,
+  "shutdown_grace_seconds": 3
+}
