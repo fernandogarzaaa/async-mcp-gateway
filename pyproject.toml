@@ -50,7 +50,7 @@ dev = [
   "locust==2.46.7",
   "mypy==1.14.0",
   "pytest==8.4.2",
-  "pytest-asyncio==0.25.0",
+  "pytest-asyncio==1.4.0",
   "pytest-cov==6.0.0",
   "ruff==0.16.10",
 ]
