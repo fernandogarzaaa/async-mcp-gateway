@@ -48,6 +48,9 @@ class Settings(BaseSettings):
     stream_connect_timeout_seconds: float = Field(default=10.0, gt=0)
     failover_budget_ms: int = Field(default=100, ge=0, le=1_000)
     sse_scan_tail_bytes: int = Field(default=512, ge=64, le=4096)
+    # Path to a JSON file holding an MCPSupervisorConfig (see
+    # mcp_servers.example.json). When unset, the /v1/mcp routes return 404.
+    mcp_config_file: str | None = None
 
     openai: ProviderConfig = ProviderConfig(
         base_url="https://api.openai.com",
