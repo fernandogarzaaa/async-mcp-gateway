@@ -103,6 +103,12 @@ class ManagedMCPProcess:
     def idle_seconds(self) -> float:
         return time.monotonic() - self.stats.last_used_at
 
+    @property
+    def has_pending(self) -> bool:
+        """Whether any request is still awaiting a response from the process."""
+
+        return bool(self._pending)
+
     async def ensure_started(self) -> None:
         """Start or recycle the underlying subprocess."""
 
@@ -134,7 +140,9 @@ class ManagedMCPProcess:
             await self._write_json_line(request.model_dump(exclude_none=True))
             self.stats.requests_total += 1
             self.stats.last_used_at = time.monotonic()
-            return await asyncio.wait_for(future, timeout=timeout)
+            response = await asyncio.wait_for(future, timeout=timeout)
+            self.stats.last_used_at = time.monotonic()
+            return response
         except TimeoutError as exc:
             self.stats.failures_total += 1
             async with self._pending_lock:
@@ -142,6 +150,14 @@ class ManagedMCPProcess:
             raise MCPRequestTimeout(
                 f"MCP request {request_id!r} timed out after {timeout:.2f}s"
             ) from exc
+        except MCPSupervisorError:
+            # The process stopped or exited while this request was in flight
+            # (the pending future was failed). Do not restart here: the next
+            # request recycles the process via ensure_started().
+            self.stats.failures_total += 1
+            async with self._pending_lock:
+                self._pending.pop(request_id, None)
+            raise
         except (BrokenPipeError, ConnectionResetError, RuntimeError) as exc:
             self.stats.failures_total += 1
             async with self._pending_lock:
@@ -150,6 +166,21 @@ class ManagedMCPProcess:
             raise MCPProcessUnavailable(
                 f"MCP process {self.config.name!r} write failed"
             ) from exc
+
+    async def notify(self, payload: Mapping[str, Any]) -> None:
+        """Send a JSON-RPC notification (no id, no response expected)."""
+
+        await self.ensure_started()
+        request = JsonRpcRequest.model_validate(dict(payload))
+        if request.id is not None:
+            raise MCPSupervisorError("notifications must not carry an id")
+        try:
+            await self._write_json_line(request.model_dump(exclude_none=True))
+        except (BrokenPipeError, ConnectionResetError) as exc:
+            raise MCPProcessUnavailable(
+                f"MCP process {self.config.name!r} write failed"
+            ) from exc
+        self.stats.last_used_at = time.monotonic()
 
     async def health_check(self) -> bool:
         """Return whether the process is alive and optionally answers a health RPC."""
@@ -450,6 +481,28 @@ class MCPProcessPoolManager:
         process = await self._get_or_create_process(tenant_id, server_name)
         return await process.request(payload)
 
+    async def notify(
+        self, tenant_id: str, server_name: str, payload: Mapping[str, Any]
+    ) -> None:
+        """Forward a JSON-RPC notification to a tenant-isolated MCP process."""
+
+        process = await self._get_or_create_process(tenant_id, server_name)
+        await process.notify(payload)
+
+    def allowed_servers(self, tenant_id: str) -> list[str]:
+        """Return the MCP server names a tenant may use."""
+
+        policy = self._config.tenant_policies.get(tenant_id)
+        names = self._config.servers.keys()
+        if policy is not None:
+            return sorted(name for name in names if name in policy.allowed_servers)
+        return sorted(names)
+
+    def has_server(self, server_name: str) -> bool:
+        """Return whether an MCP server with this name is configured."""
+
+        return server_name in self._config.servers
+
     async def health_check(self, tenant_id: str, server_name: str) -> bool:
         """Run a health check for one tenant/server process if it exists."""
 
@@ -539,7 +592,7 @@ class MCPProcessPoolManager:
             ttl = (
                 process.config.idle_ttl_seconds or self._config.default_idle_ttl_seconds
             )
-            if process.idle_seconds >= ttl:
+            if process.idle_seconds >= ttl and not process.has_pending:
                 logger.info(
                     "reaping idle mcp process",
                     extra={
