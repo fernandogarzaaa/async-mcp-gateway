@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1.7
 
-FROM python:3.14.7-slim-bookworm AS builder
+FROM python:3.14.8-slim-bookworm AS builder
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
@@ -21,7 +21,7 @@ RUN pip install --upgrade pip==24.2 \
         pydantic==2.10.4 \
         pydantic-settings==2.7.1
 
-FROM python:3.14.7-slim-bookworm AS runtime
+FROM python:3.14.8-slim-bookworm AS runtime
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
