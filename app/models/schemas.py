@@ -45,7 +45,7 @@ class JsonRpcRequest(BaseModel):
 
     @model_validator(mode="after")
     def require_id_for_request_response(self) -> "JsonRpcRequest":
-        if self.id is None and self.method != "notifications/initialized":
+        if self.id is None and not self.method.startswith("notifications/"):
             raise ValueError(
                 "JSON-RPC requests routed through the supervisor require an id"
             )

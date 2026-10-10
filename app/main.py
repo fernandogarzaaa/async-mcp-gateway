@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
@@ -11,10 +12,18 @@ import redis.asyncio as redis
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, Response, StreamingResponse
+from pydantic import ValidationError
 from redis.exceptions import RedisError
 
 from app.core.config import Settings, get_settings
 from app.core.security import TenantAuthMiddleware, TenantContext
+from app.models.schemas import MCPSupervisorConfig
+from app.services.mcp_supervisor import (
+    MCPAccessDenied,
+    MCPProcessPoolManager,
+    MCPRequestTimeout,
+    MCPSupervisorError,
+)
 from app.services.rate_limiter import (
     RedisTokenBucketRateLimiter,
     estimate_prompt_tokens,
@@ -33,6 +42,13 @@ def configure_logging(settings: Settings) -> None:
     )
 
 
+def load_mcp_config(path: str) -> MCPSupervisorConfig:
+    """Load and validate an MCP supervisor config from a JSON file."""
+
+    with open(path, encoding="utf-8") as handle:
+        return MCPSupervisorConfig.model_validate(json.load(handle))
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     settings = get_settings()
@@ -43,15 +59,26 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     rate_limiter = RedisTokenBucketRateLimiter(redis_client)
     router = LLMRouter(settings)
 
+    mcp_manager: MCPProcessPoolManager | None = None
+    if settings.mcp_config_file:
+        mcp_manager = MCPProcessPoolManager(load_mcp_config(settings.mcp_config_file))
+        await mcp_manager.start()
+
     await rate_limiter.initialize()
     app.state.settings = settings
     app.state.rate_limiter = rate_limiter
     app.state.router = router
+    app.state.mcp = mcp_manager
 
-    logger.info("ai gateway started", extra={"app_name": settings.app_name})
+    logger.info(
+        "ai gateway started",
+        extra={"app_name": settings.app_name, "mcp_enabled": mcp_manager is not None},
+    )
     try:
         yield
     finally:
+        if mcp_manager is not None:
+            await mcp_manager.close()
         await router.close()
         await rate_limiter.close()
         logger.info("ai gateway stopped")
@@ -146,6 +173,80 @@ async def chat_completions(request: Request) -> Response:
     return JSONResponse(
         content=response_payload, headers=decision.headers(tenant.config)
     )
+
+
+@app.get("/v1/mcp/servers")
+async def mcp_servers(request: Request) -> dict[str, list[str]]:
+    tenant = _tenant_context(request)
+    manager = _mcp_manager(request)
+    return {"servers": manager.allowed_servers(tenant.tenant_id)}
+
+
+@app.post("/v1/mcp/{server_name}", response_model=None)
+async def mcp_rpc(server_name: str, request: Request) -> Response:
+    """Forward one JSON-RPC message to the tenant's stdio MCP server process."""
+
+    payload = await _read_json_payload(request)
+    tenant = _tenant_context(request)
+    manager = _mcp_manager(request)
+    if not manager.has_server(server_name):
+        raise HTTPException(
+            status_code=404, detail=f"unknown MCP server {server_name!r}"
+        )
+
+    limiter: RedisTokenBucketRateLimiter = request.app.state.rate_limiter
+    try:
+        decision = await limiter.check(tenant.tenant_id, tenant.config, 1)
+    except RedisError as exc:
+        raise HTTPException(status_code=503, detail="rate limiter unavailable") from exc
+    headers = decision.headers(tenant.config)
+    if not decision.allowed:
+        return JSONResponse(
+            status_code=429,
+            content={
+                "error": {
+                    "code": "rate_limit_exceeded",
+                    "message": "tenant quota exhausted",
+                }
+            },
+            headers=headers,
+        )
+
+    try:
+        if payload.get("id") is None:
+            await manager.notify(tenant.tenant_id, server_name, payload)
+            return Response(status_code=202, headers=headers)
+        result = await manager.invoke(tenant.tenant_id, server_name, payload)
+    except ValidationError as exc:
+        reasons = "; ".join(str(error["msg"]) for error in exc.errors())
+        raise HTTPException(
+            status_code=400, detail=f"invalid JSON-RPC message: {reasons}"
+        ) from exc
+    except MCPAccessDenied as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except MCPRequestTimeout as exc:
+        raise HTTPException(status_code=504, detail=str(exc)) from exc
+    except MCPSupervisorError as exc:
+        logger.warning(
+            "mcp request failed",
+            extra={
+                "tenant_id": tenant.tenant_id,
+                "server": server_name,
+                "error": str(exc),
+            },
+        )
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    return JSONResponse(content=result, headers=headers)
+
+
+def _mcp_manager(request: Request) -> MCPProcessPoolManager:
+    manager = getattr(request.app.state, "mcp", None)
+    if not isinstance(manager, MCPProcessPoolManager):
+        raise HTTPException(
+            status_code=404,
+            detail="MCP is not configured; set MCP_CONFIG_FILE",
+        )
+    return manager
 
 
 async def _read_json_payload(request: Request) -> dict[str, Any]:
