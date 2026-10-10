@@ -15,7 +15,9 @@ from app.core.config import TenantConfig
 
 logger = logging.getLogger(__name__)
 
-TOKEN_BUCKET_LUA: Final[str] = """
+TOKEN_BUCKET_LUA: Final[
+    str
+] = """
 local now = tonumber(ARGV[1])
 local rpm_capacity = tonumber(ARGV[2])
 local rpm_refill = tonumber(ARGV[3])
