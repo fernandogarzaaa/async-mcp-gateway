@@ -185,7 +185,9 @@ async def test_reaper_does_not_kill_process_with_in_flight_request() -> None:
         await manager.close()
 
 
-def test_bare_python_resolves_to_running_interpreter(monkeypatch) -> None:
+def test_bare_python_resolves_to_running_interpreter(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """A bare `python` that is not on PATH resolves to sys.executable so the
     shipped example config works out of the box."""
     import shutil
@@ -196,11 +198,17 @@ def test_bare_python_resolves_to_running_interpreter(monkeypatch) -> None:
     assert cfg.command[1:] == ["-u", "mock_mcp_server.py"]
 
 
-def test_explicit_python_on_path_is_kept(monkeypatch, tmp_path) -> None:
+def test_explicit_python_on_path_is_kept(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     import shutil
 
     fake_python = tmp_path / "python"
     fake_python.write_text("#!/bin/sh\n")
-    monkeypatch.setattr(shutil, "which", lambda exe: str(fake_python) if exe == "python" else None)
+    monkeypatch.setattr(
+        shutil,
+        "which",
+        lambda exe: str(fake_python) if exe == "python" else None,
+    )
     cfg = MCPServerConfig(name="mock", command=["python", "-u", "mock_mcp_server.py"])
     assert cfg.command[0] == "python"
