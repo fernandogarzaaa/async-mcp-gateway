@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import shutil
+import sys
 from enum import StrEnum
 from typing import Annotated, Any, Literal
 
@@ -116,6 +118,11 @@ class MCPServerConfig(BaseModel):
     def validate_command_parts(cls, command: list[str]) -> list[str]:
         if any(not part.strip() for part in command):
             raise ValueError("command entries must be non-empty strings")
+        # A bare "python" is not on PATH on many systems (Linux distros ship
+        # only `python3`; Windows uses `py`). Resolve it to the interpreter
+        # running the gateway so shipped example configs work out of the box.
+        if command[0] == "python" and shutil.which("python") is None:
+            command = [sys.executable, *command[1:]]
         return command
 
     def tenant_environment(self, tenant_id: str) -> dict[str, str]:
