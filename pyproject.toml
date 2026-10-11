@@ -48,7 +48,7 @@ Issues = "https://github.com/fernandogarzaaa/async-mcp-gateway/issues"
 dev = [
   "black==26.10.0",
   "locust==2.46.7",
-  "mypy==1.14.0",
+  "mypy==2.4.0",
   "pytest==9.1.1",
   "pytest-asyncio==1.4.0",
   "pytest-cov==7.1.0",
