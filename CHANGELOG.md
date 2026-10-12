@@ -7,7 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.0] - 2026-10-13
+
+First tagged release.
+
 ### Security
+- CORS no longer combines `allow_credentials=True` with a wildcard origin (Starlette
+  reflects any Origin in that case); credentials are only allowed for explicit origins.
 - No default tenants: the built-in `tenant-alpha`/`tenant-beta` registry with
   publicly known tokens is gone. Configure `TENANTS`; `DEMO_TENANTS=1` loads the
   demo tenants for local development only and is refused with
@@ -24,6 +30,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `initialize` support in `mock_mcp_server.py`; JSON-RPC notifications are forwarded without waiting for a reply
 
 ### Fixed
+- Provider client errors (400, 413, 422) are returned to the caller with their status and
+  an `upstream_rejected` error (provider + upstream status + message) instead of being
+  retried on every other provider and surfacing as a 502; streaming requests get one
+  `upstream_rejected` SSE error event. 401/403/404, 429 and 5xx still fail over.
+- OpenAPI `info.version` reported 1.0.0; it now matches the package version (0.1.0).
 - The idle reaper killed MCP processes that still had a request in flight (any call longer than `idle_ttl_seconds`, and a flaky supervisor test on slow machines)
 - A request failing because its process stopped no longer triggers a second, redundant restart
 - `.env.example` set `ALLOWED_ORIGINS=*`, which crashed startup after `cp .env.example .env`; it is now `["*"]`
