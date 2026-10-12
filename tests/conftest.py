@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import os
 from collections.abc import AsyncIterator, Iterator
 from dataclasses import dataclass
 from typing import Any
@@ -12,9 +13,12 @@ import httpx
 import pytest
 import pytest_asyncio
 
-from app.core.config import TenantConfig
-from app.main import app
-from app.services.rate_limiter import RateLimitDecision
+# The gateway ships no tenants; the suite uses the documented demo tenants.
+os.environ.setdefault("DEMO_TENANTS", "1")
+
+from app.core.config import TenantConfig  # noqa: E402
+from app.main import app  # noqa: E402
+from app.services.rate_limiter import RateLimitDecision  # noqa: E402
 
 
 @pytest.fixture(scope="session")

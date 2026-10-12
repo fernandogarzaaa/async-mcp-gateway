@@ -10,6 +10,10 @@ services:
     environment:
       APP_NAME: multi-tenant-ai-gateway
       LOG_LEVEL: INFO
+      # No built-in tenants: set TENANTS (JSON) or, for local use only, DEMO_TENANTS=1.
+      TENANTS: "${TENANTS:-}"
+      DEMO_TENANTS: "${DEMO_TENANTS:-0}"
+      ENVIRONMENT: "${ENVIRONMENT:-development}"
       REDIS_URI: redis://redis:6379/0
       REQUEST_TIMEOUT_SECONDS: "30"
       STREAM_CONNECT_TIMEOUT_SECONDS: "10"
