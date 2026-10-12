@@ -178,34 +178,69 @@ class LLMRouter:
         chunks: AsyncIterator[bytes],
         provider: ProviderName,
     ) -> AsyncIterator[bytes]:
-        tail = ""
+        """Relay provider SSE bytes, terminating the stream on an injection marker.
+
+        Bytes are released one complete SSE event (``\n\n``) at a time, after
+        the event plus the trailing ``sse_scan_tail_bytes`` of already-released
+        text has been scanned, so a marker split across network chunks inside
+        one event is never forwarded. On a match the offending event is
+        dropped, a single ``gateway_error`` event is sent and the stream ends.
+        """
+        released_tail = ""
+        pending = b""
         max_tail = self._settings.sse_scan_tail_bytes
-        async for chunk in chunks:
-            started = time.perf_counter_ns()
-            text = chunk.decode("utf-8", errors="ignore")
-            scan_window = tail + text
-            matches = [
-                pattern.pattern
-                for pattern in INJECTION_PATTERNS
-                if pattern.search(scan_window)
-            ]
-            if matches:
-                logger.warning(
-                    "sse injection marker detected",
-                    extra={"provider": provider, "patterns": matches[:3]},
-                )
-                yield self._sse_error(
-                    "stream_marker_detected",
-                    "unsafe marker detected in provider stream",
-                )
-            tail = scan_window[-max_tail:]
-            elapsed_ms = (time.perf_counter_ns() - started) / 1_000_000
-            if elapsed_ms > 10:
-                logger.warning(
-                    "sse scan overhead exceeded budget",
-                    extra={"provider": provider, "elapsed_ms": elapsed_ms},
-                )
-            yield chunk
+        max_pending = 65_536
+        try:
+            async for chunk in chunks:
+                started = time.perf_counter_ns()
+                pending += chunk
+                boundary = pending.rfind(b"\n\n")
+                if boundary < 0 and len(pending) < max_pending:
+                    continue
+                cut = boundary + 2 if boundary >= 0 else len(pending)
+                ready, pending = pending[:cut], pending[cut:]
+                text = ready.decode("utf-8", errors="ignore")
+                if self._scan_for_markers(released_tail + text, provider):
+                    yield self._sse_error(
+                        "stream_marker_detected",
+                        "unsafe marker detected in provider stream; stream terminated",
+                    )
+                    return
+                released_tail = (released_tail + text)[-max_tail:]
+                self._warn_scan_overhead(started, provider)
+                yield ready
+            if pending:
+                text = pending.decode("utf-8", errors="ignore")
+                if self._scan_for_markers(released_tail + text, provider):
+                    yield self._sse_error(
+                        "stream_marker_detected",
+                        "unsafe marker detected in provider stream; stream terminated",
+                    )
+                    return
+                yield pending
+        finally:
+            aclose = getattr(chunks, "aclose", None)
+            if aclose is not None:
+                await aclose()
+
+    @staticmethod
+    def _scan_for_markers(window: str, provider: ProviderName) -> bool:
+        matches = [p.pattern for p in INJECTION_PATTERNS if p.search(window)]
+        if matches:
+            logger.warning(
+                "sse injection marker detected; terminating stream",
+                extra={"provider": provider, "patterns": matches[:3]},
+            )
+        return bool(matches)
+
+    @staticmethod
+    def _warn_scan_overhead(started_ns: int, provider: ProviderName) -> None:
+        elapsed_ms = (time.perf_counter_ns() - started_ns) / 1_000_000
+        if elapsed_ms > 10:
+            logger.warning(
+                "sse scan overhead exceeded budget",
+                extra={"provider": provider, "elapsed_ms": elapsed_ms},
+            )
 
     def _payload_for_provider(
         self,
