@@ -5,10 +5,15 @@ An asynchronous, multi-tenant gateway for LLM chat completions and Model Context
 - **Tenant authentication**: every request (except health checks) must carry an `X-Tenant-ID` header and a matching `Authorization: Bearer <token>`.
 - **Rate limiting**: an atomic Redis token bucket per tenant, enforcing requests-per-minute and tokens-per-minute quotas. Responses carry rate-limit headers; exhausted quotas return `429`.
 - **Provider failover**: each tenant has an ordered provider preference (`openai`, `anthropic`, `local`). The router tries them in order and fails over on upstream errors within a configurable budget.
-- **Streaming**: `stream: true` requests are proxied as Server-Sent Events, with incremental scanning of the stream across chunk boundaries.
+- **Streaming**: `stream: true` requests are proxied as Server-Sent Events. Provider output is released one SSE event at a time after it is scanned for injection markers (including markers split across network chunks); on a match the offending event is dropped, one `gateway_error` event is sent and the stream is terminated.
 - **MCP over HTTP** (`POST /v1/mcp/{server}`): forwards JSON-RPC messages to stdio MCP servers, each running as its own process per tenant and server (`app/services/mcp_supervisor.py`), with per-tenant allow-lists, health checks, crash recovery and idle reaping.
 
-> Status: beta. Tenants are an in-memory mock registry defined in `app/core/config.py` (`tenant-alpha`, `tenant-beta`). Replace it with a real store before production use.
+> Status: beta. **There are no built-in tenants**: the gateway refuses to start until you configure them.
+>
+> - Production: set `TENANTS` to a JSON object of tenant configs, e.g.
+>   `TENANTS='{"acme": {"tenant_id": "acme", "bearer_token": "<long random token>", "rpm_limit": 120, "tpm_limit": 120000, "provider_preference": ["openai", "anthropic", "local"]}}'`
+> - Local development only: `DEMO_TENANTS=1` loads `tenant-alpha` / `tenant-beta` with the
+>   publicly documented tokens used in the examples below. It is refused when `ENVIRONMENT=production`.
 
 ## Endpoints
 
@@ -37,7 +42,7 @@ curl http://127.0.0.1:8000/v1/chat/completions \
 ### Docker Compose
 
 ```bash
-cp .env.example .env   # then fill in provider API keys
+cp .env.example .env   # then fill in provider API keys (it enables DEMO_TENANTS=1 for local use)
 docker compose up --build
 ```
 
@@ -132,7 +137,7 @@ Options can also be set with `BENCHMARK_BASE_URL`, `BENCHMARK_TENANTS`, `BENCHMA
 docker compose --profile test up --build benchmark
 ```
 
-Notes: the benchmark sends tenant IDs `tenant-000`, `tenant-001`, … with tokens `tenant-token-000`, …, so those tenants must exist in the registry (the default registry only has `tenant-alpha` and `tenant-beta`, so other requests are rejected with `403`). It also opens an HTTP/2 client, which needs the `h2` package (`pip install 'httpx[http2]'`).
+Notes: the benchmark sends tenant IDs `tenant-000`, `tenant-001`, … with tokens `tenant-token-000`, …, so those tenants must exist in the registry (configure them via `TENANTS`; the `DEMO_TENANTS=1` registry only has `tenant-alpha` and `tenant-beta`, so other requests are rejected with `403`). It also opens an HTTP/2 client, which needs the `h2` package (`pip install 'httpx[http2]'`).
 
 ## License
 
