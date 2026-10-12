@@ -28,7 +28,7 @@ from app.services.rate_limiter import (
     RedisTokenBucketRateLimiter,
     estimate_prompt_tokens,
 )
-from app.services.router import LLMRouter, ProviderRoutingError
+from app.services.router import LLMRouter, ProviderClientError, ProviderRoutingError
 
 logger = logging.getLogger(__name__)
 
@@ -86,12 +86,17 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
 
 settings = get_settings()
-app = FastAPI(title=settings.app_name, version="1.0.0", lifespan=lifespan)
+# Keep in sync with pyproject.toml [project].version (app is not installed).
+_version = "0.1.0"
+_cors_origins = [str(origin) for origin in settings.allowed_origins]
+app = FastAPI(title=settings.app_name, version=_version, lifespan=lifespan)
 app.add_middleware(TenantAuthMiddleware, settings=settings)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[str(origin) for origin in settings.allowed_origins],
-    allow_credentials=True,
+    allow_origins=_cors_origins,
+    # Credentialed CORS with a wildcard origin makes Starlette reflect any Origin;
+    # auth is a bearer header anyway, so only allow credentials for explicit origins.
+    allow_credentials="*" not in _cors_origins,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -159,6 +164,16 @@ async def chat_completions(request: Request) -> Response:
     try:
         response_payload = await router.create_chat_completion(
             payload, tenant.config, request.headers
+        )
+    except ProviderClientError as exc:
+        logger.warning(
+            "provider rejected request",
+            extra={"tenant_id": tenant.tenant_id, "error": str(exc)},
+        )
+        return JSONResponse(
+            status_code=exc.status_code,
+            content=exc.to_payload(),
+            headers=decision.headers(tenant.config),
         )
     except ProviderRoutingError as exc:
         logger.error(

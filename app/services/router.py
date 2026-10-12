@@ -46,6 +46,50 @@ class ProviderRoutingError(RuntimeError):
         super().__init__(f"all provider attempts failed: {', '.join(details)}")
 
 
+# Upstream statuses that describe the request itself (malformed body, too large,
+# unprocessable). Retrying them on the next provider only multiplies cost and turns
+# a client error into a misleading 502, so they are returned to the caller as-is.
+NON_RETRYABLE_STATUSES = frozenset({400, 413, 422})
+
+
+class ProviderClientError(RuntimeError):
+    """Raised when a provider rejects the request itself (no failover)."""
+
+    def __init__(self, provider: ProviderName, status_code: int, message: str) -> None:
+        self.provider = provider
+        self.status_code = status_code
+        self.message = message
+        super().__init__(f"{provider} rejected the request ({status_code}): {message}")
+
+    def to_payload(self) -> JsonDict:
+        return {
+            "error": {
+                "code": "upstream_rejected",
+                "message": self.message,
+                "provider": self.provider,
+                "upstream_status": self.status_code,
+            }
+        }
+
+
+def _upstream_error_message(body: bytes) -> str:
+    """Best-effort message from an upstream error body (OpenAI/Anthropic shapes)."""
+
+    try:
+        data = json.loads(body)
+    except (json.JSONDecodeError, UnicodeDecodeError):
+        return body[:500].decode("utf-8", "replace") or "upstream rejected the request"
+    if isinstance(data, dict):
+        err = data.get("error")
+        if isinstance(err, dict) and isinstance(err.get("message"), str):
+            return cast(str, err["message"])[:500]
+        if isinstance(err, str):
+            return err[:500]
+        if isinstance(data.get("message"), str):
+            return cast(str, data["message"])[:500]
+    return json.dumps(data)[:500]
+
+
 class LLMRouter:
     """Proxy requests to upstream providers and fail over on transient exhaustion."""
 
@@ -101,6 +145,19 @@ class LLMRouter:
                 await self._failover_pause(started)
                 continue
 
+            if response.status_code in NON_RETRYABLE_STATUSES:
+                body = await response.aread()
+                attempts.append(
+                    self._attempt(provider, started, status_code=response.status_code)
+                )
+                logger.warning(
+                    "provider rejected request; not failing over",
+                    extra={"provider": provider, "status_code": response.status_code},
+                )
+                raise ProviderClientError(
+                    provider, response.status_code, _upstream_error_message(body)
+                )
+
             try:
                 response.raise_for_status()
                 return cast(JsonDict, response.json())
@@ -151,6 +208,22 @@ class LLMRouter:
                         await response.aread()
                         await self._failover_pause(started)
                         continue
+                    if response.status_code in NON_RETRYABLE_STATUSES:
+                        body = await response.aread()
+                        rejected = ProviderClientError(
+                            provider,
+                            response.status_code,
+                            _upstream_error_message(body),
+                        )
+                        logger.warning(
+                            "stream provider rejected request; not failing over",
+                            extra={
+                                "provider": provider,
+                                "status_code": response.status_code,
+                            },
+                        )
+                        yield self._sse_error("upstream_rejected", str(rejected))
+                        return
                     response.raise_for_status()
                     async for chunk in self._intercept_sse(
                         response.aiter_bytes(), provider
