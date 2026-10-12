@@ -5,7 +5,7 @@ from __future__ import annotations
 from functools import lru_cache
 from typing import Literal
 
-from pydantic import AnyHttpUrl, Field, SecretStr
+from pydantic import AnyHttpUrl, Field, SecretStr, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 ProviderName = Literal["openai", "anthropic", "local"]
@@ -71,7 +71,34 @@ class Settings(BaseSettings):
         default_model="local-fallback",
     )
 
-    tenants: dict[str, TenantConfig] = {
+    # Tenant registry. There are no built-in tenants: configure them with the
+    # TENANTS env var (JSON object of TenantConfig keyed by tenant id), or set
+    # DEMO_TENANTS=1 for local development to load the two documented demo
+    # tenants. Demo tenants are refused when ENVIRONMENT=production.
+    tenants: dict[str, TenantConfig] = {}
+    demo_tenants: bool = False
+    environment: str = "development"
+
+    allowed_origins: list[str | AnyHttpUrl] = ["*"]
+
+    @model_validator(mode="after")
+    def _apply_demo_tenants(self) -> Settings:
+        if not self.demo_tenants:
+            return self
+        if self.environment.strip().lower() in {"prod", "production"}:
+            raise ValueError(
+                "DEMO_TENANTS uses publicly documented tokens and is refused "
+                "when ENVIRONMENT=production; configure TENANTS instead"
+            )
+        if not self.tenants:
+            self.tenants = demo_tenant_registry()
+        return self
+
+
+def demo_tenant_registry() -> dict[str, TenantConfig]:
+    """Local-development tenants with publicly documented tokens (DEMO_TENANTS=1)."""
+
+    return {
         "tenant-alpha": TenantConfig(
             tenant_id="tenant-alpha",
             bearer_token=SecretStr("alpha-secret-token"),
@@ -90,7 +117,19 @@ class Settings(BaseSettings):
         ),
     }
 
-    allowed_origins: list[str | AnyHttpUrl] = ["*"]
+
+class ConfigurationError(RuntimeError):
+    """Raised at startup when the gateway would run in an unsafe configuration."""
+
+
+def ensure_tenants_configured(settings: Settings) -> None:
+    """Fail closed: refuse to start with an empty tenant registry."""
+
+    if not settings.tenants:
+        raise ConfigurationError(
+            "no tenants configured: set TENANTS (JSON) or, for local "
+            "development only, DEMO_TENANTS=1"
+        )
 
 
 @lru_cache(maxsize=1)

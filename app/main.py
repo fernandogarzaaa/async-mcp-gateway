@@ -15,7 +15,7 @@ from fastapi.responses import JSONResponse, Response, StreamingResponse
 from pydantic import ValidationError
 from redis.exceptions import RedisError
 
-from app.core.config import Settings, get_settings
+from app.core.config import Settings, ensure_tenants_configured, get_settings
 from app.core.security import TenantAuthMiddleware, TenantContext
 from app.models.schemas import MCPSupervisorConfig
 from app.services.mcp_supervisor import (
@@ -53,6 +53,7 @@ def load_mcp_config(path: str) -> MCPSupervisorConfig:
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     settings = get_settings()
     configure_logging(settings)
+    ensure_tenants_configured(settings)
 
     redis_from_url = cast(Callable[..., redis.Redis], redis.from_url)
     redis_client = redis_from_url(settings.redis_uri, decode_responses=True)
