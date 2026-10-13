@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-10-13
+
+### Security
+- The SSE injection guard also scans the decoded token text (`choices[].delta.content`,
+  Anthropic `delta.text`) as a rolling window, so a marker streamed one token per
+  event ("ignore " / "previous " / "instructions") is caught; previously only raw
+  bytes were scanned and such markers were forwarded (#23).
+
+### Fixed
+- A non-ASCII bearer token returned 500 (`hmac.compare_digest` TypeError); it is now
+  rejected with 400 `invalid_request`, and tokens are compared as bytes (#24).
+- A non-integer `max_tokens` crashed the Anthropic translation (500); the chat route
+  now returns 400 unless it is a positive integer (#24).
+- Malformed `messages` (not a non-empty array of objects with a string `role` and
+  string/array/null `content`) return 400 instead of being forwarded upstream (#25).
+- Keyless providers (local/Ollama) get no `Authorization` header instead of an
+  empty `Bearer ` (#22).
+
 ## [0.1.0] - 2026-10-13
 
 First tagged release.

@@ -1,6 +1,6 @@
 [project]
 name = "async-mcp-gateway"
-version = "0.1.0"
+version = "0.1.1"
 description = "Production-grade asynchronous multi-tenant AI gateway with Redis rate limiting, provider failover, and MCP process supervision."
 readme = "README.md"
 requires-python = ">=3.11,<3.14"
