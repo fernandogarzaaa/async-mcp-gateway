@@ -120,6 +120,7 @@ async def readyz(request: Request) -> dict[str, str]:
 @app.post("/v1/chat/completions", response_model=None)
 async def chat_completions(request: Request) -> Response:
     payload = await _read_json_payload(request)
+    _validate_chat_payload(payload)
     tenant = _tenant_context(request)
     estimated_tokens = estimate_prompt_tokens(payload)
 
@@ -273,6 +274,20 @@ async def _read_json_payload(request: Request) -> dict[str, Any]:
     if not isinstance(payload, dict):
         raise HTTPException(status_code=400, detail="JSON body must be an object")
     return payload
+
+
+def _validate_chat_payload(payload: dict[str, Any]) -> None:
+    """Reject request bodies the providers (or our translation) cannot accept."""
+
+    max_tokens = payload.get("max_tokens")
+    if max_tokens is not None and (
+        isinstance(max_tokens, bool)
+        or not isinstance(max_tokens, int)
+        or max_tokens < 1
+    ):
+        raise HTTPException(
+            status_code=400, detail="max_tokens must be a positive integer"
+        )
 
 
 def _tenant_context(request: Request) -> TenantContext:

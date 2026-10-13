@@ -53,8 +53,17 @@ class TenantAuthMiddleware(BaseHTTPMiddleware):
             return self._reject(403, "unknown_tenant", "tenant is not configured")
 
         token = self._extract_bearer_token(authorization)
+        if token is not None and not token.isascii():
+            # RFC 6750 tokens are ASCII; hmac.compare_digest raises TypeError on
+            # non-ASCII str, which used to surface as a 500.
+            logger.warning("non-ascii bearer token", extra={"tenant_id": tenant_id})
+            return self._reject(
+                400, "invalid_request", "bearer token must be ASCII", challenge=False
+            )
         expected = tenant.bearer_token.get_secret_value()
-        if token is None or not hmac.compare_digest(token, expected):
+        if token is None or not hmac.compare_digest(
+            token.encode("utf-8"), expected.encode("utf-8")
+        ):
             logger.warning("invalid tenant token", extra={"tenant_id": tenant_id})
             return self._reject(401, "invalid_token", "invalid bearer token")
 
@@ -69,9 +78,11 @@ class TenantAuthMiddleware(BaseHTTPMiddleware):
         return token.strip()
 
     @staticmethod
-    def _reject(status_code: int, code: str, message: str) -> JSONResponse:
+    def _reject(
+        status_code: int, code: str, message: str, *, challenge: bool = True
+    ) -> JSONResponse:
         return JSONResponse(
             status_code=status_code,
             content={"error": {"code": code, "message": message}},
-            headers={"WWW-Authenticate": "Bearer"},
+            headers={"WWW-Authenticate": "Bearer"} if challenge else None,
         )

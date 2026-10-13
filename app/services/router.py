@@ -27,6 +27,13 @@ INJECTION_PATTERNS: tuple[re.Pattern[str], ...] = (
 )
 
 
+def _max_tokens(value: object, default: int = 1024) -> int:
+    """Anthropic requires max_tokens; fall back to the default when unusable."""
+    if isinstance(value, int) and not isinstance(value, bool) and value > 0:
+        return value
+    return default
+
+
 @dataclass(frozen=True, slots=True)
 class ProviderAttempt:
     """Provider request attempt metadata."""
@@ -387,7 +394,7 @@ class LLMRouter:
                     "content": self._stringify_content(payload.get("prompt", "")),
                 }
             ],
-            "max_tokens": int(payload.get("max_tokens") or 1024),
+            "max_tokens": _max_tokens(payload.get("max_tokens")),
             "temperature": payload.get("temperature", 0.2),
             "stream": bool(payload.get("stream", False)),
         }
