@@ -424,13 +424,18 @@ class LLMRouter:
             "Content-Type": "application/json",
             "User-Agent": "multi-tenant-ai-gateway/1.0",
         }
+        api_key = config.api_key.get_secret_value().strip()
         if provider == "anthropic":
-            headers["x-api-key"] = config.api_key.get_secret_value()
+            if api_key:
+                headers["x-api-key"] = api_key
             headers["anthropic-version"] = inbound_headers.get(
                 "anthropic-version", "2023-06-01"
             )
-        else:
-            headers["Authorization"] = f"Bearer {config.api_key.get_secret_value()}"
+        elif api_key:
+            # Keyless upstreams (Ollama, vLLM, llama.cpp server) get no auth header:
+            # "Bearer " with an empty token is an illegal header value in httpx, which
+            # made every request to a keyless provider fail before it was sent.
+            headers["Authorization"] = f"Bearer {api_key}"
         return headers
 
     def _config_for(self, provider: ProviderName) -> ProviderConfig:
