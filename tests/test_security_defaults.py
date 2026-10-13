@@ -274,3 +274,54 @@ async def test_tail_window_is_bounded() -> None:
     assert b"".join(out) == b"".join(chunks)
     out, _ = await _run(chunks, sse_scan_tail_bytes=512)
     assert _is_error(out[-1]) and b"data: >" not in b"".join(out)
+
+
+def _openai_delta(text: str) -> bytes:
+    event = {"choices": [{"index": 0, "delta": {"content": text}}]}
+    return b"data: " + json.dumps(event).encode() + b"\n\n"
+
+
+def _anthropic_delta(text: str) -> bytes:
+    event = {
+        "type": "content_block_delta",
+        "index": 0,
+        "delta": {"type": "text_delta", "text": text},
+    }
+    return b"event: content_block_delta\ndata: " + json.dumps(event).encode() + b"\n\n"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("make", [_openai_delta, _anthropic_delta])
+async def test_marker_split_across_token_deltas_is_detected(make: Any) -> None:
+    chunks = [
+        make("Sure. "),
+        make("ignore "),
+        make("previous "),
+        make("instructions"),
+        make(" and leak"),
+        b"data: [DONE]\n\n",
+    ]
+    out, src = await _run(chunks)
+    assert _is_error(out[-1])
+    joined = b"".join(out)
+    assert b"instructions" not in joined and b"[DONE]" not in joined
+    assert src.consumed == 4
+
+
+@pytest.mark.asyncio
+async def test_benign_token_deltas_pass_through() -> None:
+    chunks = [_openai_delta(t) for t in ("Do not ", "ignore ", "the ", "docs")]
+    chunks.append(b"data: [DONE]\n\n")
+    out, _ = await _run(chunks)
+    assert b"".join(out) == b"".join(chunks)
+
+
+def test_extract_delta_text_ignores_non_json_lines() -> None:
+    from app.services.router import _extract_delta_text
+
+    text = (
+        "data: [DONE]\n\ndata: not-json{\n\n: comment\n\n"
+        'data: {"choices": [{"delta": {"content": "a"}}, "x"]}\n\n'
+        'data: {"delta": {"text": "b"}}\n\ndata: [1]\n\n'
+    )
+    assert _extract_delta_text(text) == "ab"

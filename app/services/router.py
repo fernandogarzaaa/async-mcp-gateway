@@ -34,6 +34,42 @@ def _max_tokens(value: object, default: int = 1024) -> int:
     return default
 
 
+def _extract_delta_text(sse_text: str) -> str:
+    """Concatenate the decoded token text carried by SSE ``data:`` lines.
+
+    Providers stream one token per event (OpenAI ``choices[].delta.content``,
+    Anthropic ``delta.text``), so a marker such as "ignore previous
+    instructions" can be split across events and never appear contiguously in
+    the raw bytes. The guard scans this decoded text as a rolling window too.
+    Lines that are not JSON objects are ignored.
+    """
+    parts: list[str] = []
+    for line in sse_text.splitlines():
+        if not line.startswith("data:"):
+            continue
+        data = line[5:].strip()
+        if not data.startswith("{"):
+            continue
+        try:
+            event = json.loads(data)
+        except ValueError:
+            continue
+        if not isinstance(event, dict):
+            continue
+        deltas: list[object] = [event.get("delta")]
+        choices = event.get("choices")
+        if isinstance(choices, list):
+            deltas.extend(c.get("delta") for c in choices if isinstance(c, dict))
+        for delta in deltas:
+            if not isinstance(delta, dict):
+                continue
+            for key in ("content", "text"):
+                value = delta.get(key)
+                if isinstance(value, str):
+                    parts.append(value)
+    return "".join(parts)
+
+
 @dataclass(frozen=True, slots=True)
 class ProviderAttempt:
     """Provider request attempt metadata."""
@@ -267,6 +303,7 @@ class LLMRouter:
         dropped, a single ``gateway_error`` event is sent and the stream ends.
         """
         released_tail = ""
+        decoded_tail = ""
         pending = b""
         max_tail = self._settings.sse_scan_tail_bytes
         max_pending = 65_536
@@ -280,18 +317,25 @@ class LLMRouter:
                 cut = boundary + 2 if boundary >= 0 else len(pending)
                 ready, pending = pending[:cut], pending[cut:]
                 text = ready.decode("utf-8", errors="ignore")
-                if self._scan_for_markers(released_tail + text, provider):
+                decoded = decoded_tail + _extract_delta_text(text)
+                if self._scan_for_markers(
+                    released_tail + text, provider
+                ) or self._scan_for_markers(decoded, provider):
                     yield self._sse_error(
                         "stream_marker_detected",
                         "unsafe marker detected in provider stream; stream terminated",
                     )
                     return
                 released_tail = (released_tail + text)[-max_tail:]
+                decoded_tail = decoded[-max_tail:]
                 self._warn_scan_overhead(started, provider)
                 yield ready
             if pending:
                 text = pending.decode("utf-8", errors="ignore")
-                if self._scan_for_markers(released_tail + text, provider):
+                decoded = decoded_tail + _extract_delta_text(text)
+                if self._scan_for_markers(
+                    released_tail + text, provider
+                ) or self._scan_for_markers(decoded, provider):
                     yield self._sse_error(
                         "stream_marker_detected",
                         "unsafe marker detected in provider stream; stream terminated",
