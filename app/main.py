@@ -279,6 +279,33 @@ async def _read_json_payload(request: Request) -> dict[str, Any]:
 def _validate_chat_payload(payload: dict[str, Any]) -> None:
     """Reject request bodies the providers (or our translation) cannot accept."""
 
+    messages = payload.get("messages")
+    if messages is None:
+        if not isinstance(payload.get("prompt"), str):
+            raise HTTPException(status_code=400, detail="messages is required")
+    elif not isinstance(messages, list) or not messages:
+        raise HTTPException(
+            status_code=400, detail="messages must be a non-empty array"
+        )
+    else:
+        for index, message in enumerate(messages):
+            if not isinstance(message, dict):
+                raise HTTPException(
+                    status_code=400, detail=f"messages[{index}] must be an object"
+                )
+            role = message.get("role")
+            if not isinstance(role, str) or not role.strip():
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"messages[{index}].role must be a non-empty string",
+                )
+            content = message.get("content")
+            if content is not None and not isinstance(content, (str, list)):
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"messages[{index}].content must be a string or array",
+                )
+
     max_tokens = payload.get("max_tokens")
     if max_tokens is not None and (
         isinstance(max_tokens, bool)
