@@ -341,3 +341,98 @@ async def test_stream_all_providers_down_yields_upstream_unavailable() -> None:
     body = b"".join(chunks)
     assert b"upstream_unavailable" in body
     assert b"openai:500" in body
+
+
+@pytest.mark.asyncio
+async def test_keyless_local_provider_gets_no_auth_header() -> None:
+    """Ollama / vLLM / llama.cpp need no key; an empty "Bearer " header is illegal."""
+
+    seen: list[dict[str, str]] = []
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(dict(request.headers))
+        if request.headers.get("accept") == "text/event-stream":
+            return httpx.Response(
+                200,
+                content=(
+                    b'data: {"choices":[{"delta":{"content":"hi"}}]}\n\n'
+                    b"data: [DONE]\n\n"
+                ),
+                headers={"content-type": "text/event-stream"},
+            )
+        return httpx.Response(200, json={"id": "local-ok", "choices": []})
+
+    settings = Settings(
+        failover_budget_ms=0,
+        local=ProviderConfig(
+            base_url="http://ollama.test",
+            chat_path="/v1/chat/completions",
+            stream_path="/v1/chat/completions",
+            default_model="llama3",
+        ),
+        anthropic=ProviderConfig(
+            base_url="https://anthropic.test",
+            chat_path="/v1/messages",
+            stream_path="/v1/messages",
+            default_model="claude-test",
+        ),
+    )
+    tenant = TenantConfig(
+        tenant_id="tenant-local",
+        bearer_token=SecretStr("token"),
+        rpm_limit=100,
+        tpm_limit=100_000,
+        provider_preference=["local", "anthropic"],
+    )
+    router = LLMRouter(settings)
+    await router._client.aclose()
+    router._client = httpx.AsyncClient(
+        transport=httpx.MockTransport(handler), timeout=30.0
+    )
+    try:
+        result = await router.create_chat_completion(
+            {"messages": [{"role": "user", "content": "hi"}]}, tenant, {}
+        )
+        chunks = [
+            chunk
+            async for chunk in router.stream_chat_completion(
+                {"messages": [{"role": "user", "content": "hi"}], "stream": True},
+                tenant,
+                {},
+            )
+        ]
+    finally:
+        await router.close()
+
+    assert result["id"] == "local-ok"
+    assert b"[DONE]" in b"".join(chunks)
+    assert len(seen) == 2
+    for headers in seen:
+        assert "authorization" not in headers
+        assert "x-api-key" not in headers
+    # Keyed providers still authenticate.
+    keyed = LLMRouter(
+        Settings(
+            openai=ProviderConfig(
+                base_url="https://openai.test",
+                api_key=SecretStr("o-key"),
+                chat_path="/v1/chat/completions",
+                stream_path="/v1/chat/completions",
+                default_model="gpt-test",
+            ),
+            anthropic=ProviderConfig(
+                base_url="https://anthropic.test",
+                api_key=SecretStr("a-key"),
+                chat_path="/v1/messages",
+                stream_path="/v1/messages",
+                default_model="claude-test",
+            ),
+        )
+    )
+    try:
+        assert keyed._headers_for("openai", {}, stream=False)["Authorization"] == (
+            "Bearer o-key"
+        )
+        assert keyed._headers_for("anthropic", {}, stream=False)["x-api-key"] == "a-key"
+    finally:
+        await keyed.close()
