@@ -87,7 +87,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
 settings = get_settings()
 # Keep in sync with pyproject.toml [project].version (app is not installed).
-_version = "0.1.0"
+_version = "0.1.1"
 _cors_origins = [str(origin) for origin in settings.allowed_origins]
 app = FastAPI(title=settings.app_name, version=_version, lifespan=lifespan)
 app.add_middleware(TenantAuthMiddleware, settings=settings)
