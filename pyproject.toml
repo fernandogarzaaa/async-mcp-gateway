@@ -32,7 +32,7 @@ classifiers = [
 dependencies = [
   "fastapi==0.115.6",
   "uvicorn[standard]==0.54.0",
-  "redis[hiredis]==5.2.1",
+  "redis[hiredis]==8.1.0",
   "httpx==0.28.1",
   "pydantic>=2.0,<3.0",
   "pydantic-settings==2.15.0",
